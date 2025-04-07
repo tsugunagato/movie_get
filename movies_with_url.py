@@ -6,6 +6,8 @@ from dateutil.relativedelta import relativedelta
 import re
 import time
 
+MIN_CHECKIN = 500
+
 def scrape_movie_dates_with_selenium(url):
     """Seleniumを使って指定されたURLの映画.com公開予定ページから映画のタイトルと気になる数をスクレイピングする"""
     movie_data = {}
@@ -48,16 +50,19 @@ def scrape_movie_dates_with_selenium(url):
                                 current_release_date = None
                     except ValueError:
                         current_release_date = None
-                    seen_titles = set() # 新しい日付になったらseen_titlesをリセット
+                    seen_titles = set()
                     if current_release_date:
-                        print(f"  新しい日付を検出: {current_release_date}")
+                        #print(f"  新しい日付を検出: {current_release_date}")
+                        pass
 
             elif element.name == 'div' and 'list-block2' in element.get('class', []):
                 if current_release_date:
                     title_element = element.find('h3', class_='title')
                     checkin_box = element.find('div', class_='txt-box txt-box2')
                     if title_element and title_element.find('a') and checkin_box:
-                        title = title_element.find('a').text.strip()
+                        title_link = title_element.find('a')
+                        title = title_link.text.strip()
+                        url = title_link.get('href')
                         normalized_title = title.strip()
                         checkin_button = checkin_box.find('input', class_='checkin-btn checkin-count')
                         if normalized_title not in seen_titles:
@@ -65,10 +70,10 @@ def scrape_movie_dates_with_selenium(url):
                                 checkin_count_str = checkin_button['value'].strip()
                                 if checkin_count_str and checkin_count_str.isdigit():
                                     checkin_count_int = int(checkin_count_str)
-                                    print(f"    タイトル: {normalized_title}, 公開日: {current_release_date}")
+                                    # print(f"    タイトル: {normalized_title}, 公開日: {current_release_date}, URL: {url}")
                                     if current_release_date not in movie_data:
                                         movie_data[current_release_date] = []
-                                    movie_data[current_release_date].append({'title': normalized_title, 'checkin_count': checkin_count_int})
+                                    movie_data[current_release_date].append({'title': normalized_title, 'checkin_count': checkin_count_int, 'url': url}) # URLを保存
                                     seen_titles.add(normalized_title)
 
         print(f"Seleniumで {url} のスクレイピングを終了しました。")
@@ -109,7 +114,7 @@ def filter_and_format_output(movie_data, min_checkin=1000):
                 future_movies[release_date] = []
             for movie in movie_list:
                 if movie['checkin_count'] >= min_checkin:
-                    future_movies[release_date].append(movie['title'])
+                    future_movies[release_date].append({'title': movie['title'], 'url': movie.get('url')}) # URLも保存
 
     output = []
     sorted_dates = sorted(future_movies.keys())
@@ -120,13 +125,18 @@ def filter_and_format_output(movie_data, min_checkin=1000):
         if current_month != month:
             output.append(f"\n{month}月")
             current_month = month
-        for title in sorted(list(set(future_movies[date]))): # 最終出力時にも念のため重複排除
-            output.append(f"{month}/{day} {title}")
+        for movie_info in sorted(future_movies[date], key=lambda x: x['title']): # タイトルでソート
+            title = movie_info['title']
+            url = movie_info.get('url')
+            if url:
+                output.append(f"{month}/{day} [{title}](https://eiga.com{url})")
+            else:
+                output.append(f"{month}/{day} {title}") # URLがない場合はリンクなしで出力
     return "\n".join(output)
 
 if __name__ == "__main__":
     upcoming_movie_data = get_upcoming_movie_data(num_months=4)
-    output_text = filter_and_format_output(upcoming_movie_data, min_checkin=1000)
+    output_text = filter_and_format_output(upcoming_movie_data, MIN_CHECKIN)
 
     output_file = "movie_dates.txt"
     try:
